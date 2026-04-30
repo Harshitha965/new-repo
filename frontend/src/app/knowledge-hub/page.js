@@ -11,7 +11,9 @@ export default function KnowledgeHubPage() {
   const [activeResolution, setActiveResolution] = useState(null)
   const [scenarios, setScenarios] = useState([])
   const [isFetchingState, setIsFetchingState] = useState(false)
-  const [expertDecision, setExpertDecision] = useState('')
+  const [expertDecisions, setExpertDecisions] = useState({})
+  const [committedScenarios, setCommittedScenarios] = useState(new Set())
+  const [extractedCases, setExtractedCases] = useState([])
 
   // Accordion & Document View State
   const [expandedFileId, setExpandedFileId] = useState(null)
@@ -191,7 +193,8 @@ export default function KnowledgeHubPage() {
     setActiveResolution(file)
     setIsFetchingState(true)
     setScenarios([])
-    setExpertDecision('')
+    setExpertDecisions({})
+    setCommittedScenarios(new Set())
     setExtractedCases([])
 
     try {
@@ -208,22 +211,33 @@ export default function KnowledgeHubPage() {
   }
 
   const handleCommitResolution = async (scenario_id) => {
-    if (!expertDecision.trim()) {
-      alert("Please provide an expert decision.")
+    // Prevent duplicate submissions
+    if (committedScenarios.has(scenario_id)) return
+
+    const decision = (expertDecisions[scenario_id] || '').trim()
+    if (!decision) {
+      alert("Please provide an expert decision for this scenario.")
       return
     }
 
     try {
-      const res = await fetch(`http://127.0.0.1:8000/api/commit?scenario_id=${scenario_id}&expert_decision=${encodeURIComponent(expertDecision)}&archetype=Safety`, {
+      const res = await fetch(`http://127.0.0.1:8000/api/commit?scenario_id=${scenario_id}&expert_decision=${encodeURIComponent(decision)}&archetype=Safety`, {
         method: 'POST'
       })
       if (!res.ok) throw new Error("Commit failed")
 
-      alert("Expert logic committed to Logic Vault successfully!")
+      // Mark this scenario as committed (keep it visible but disabled)
+      setCommittedScenarios(prev => new Set([...prev, scenario_id]))
 
-      // Update file status to archived
-      setFiles(prev => prev.map(f => f.id === activeResolution.id ? { ...f, status: 'archived', message: 'Committed to Logic Vault' } : f))
-      setActiveResolution(null)
+      // Check if ALL scenarios are now committed
+      const newCommittedCount = committedScenarios.size + 1
+      if (newCommittedCount >= scenarios.length) {
+        // All done — archive the file and close the modal after a brief delay
+        setTimeout(() => {
+          setFiles(prev => prev.map(f => f.id === activeResolution.id ? { ...f, status: 'archived', message: 'All scenarios committed to Logic Vault' } : f))
+          setActiveResolution(null)
+        }, 1500)
+      }
 
     } catch (e) {
       console.error(e)
@@ -496,37 +510,73 @@ export default function KnowledgeHubPage() {
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
                       <h4 style={{ fontSize: 16, fontWeight: 600 }}>Synthetic Scenarios (HITL)</h4>
-                      <span className="badge badge-amber">Action required</span>
+                      {committedScenarios.size >= scenarios.length ? (
+                        <span className="badge badge-green">All committed ✓</span>
+                      ) : (
+                        <span className="badge badge-amber">{scenarios.length - committedScenarios.size} remaining</span>
+                      )}
                     </div>
 
-                    {scenarios.map((scene, idx) => (
-                      <div key={idx} style={{ background: 'var(--bg-elevated)', padding: 20, borderRadius: 'var(--radius-md)', marginBottom: 24, border: '1px solid var(--border)' }}>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent-orange)', marginBottom: 8 }}>SCENARIO {idx + 1}</div>
-                        <div style={{ fontSize: 15, lineHeight: 1.6, marginBottom: 16 }}>{scene.scenario_text}</div>
+                    {scenarios.map((scene, idx) => {
+                      const isCommitted = committedScenarios.has(scene.id)
+                      return (
+                        <div key={scene.id || idx} style={{
+                          background: isCommitted ? '#F0FDF4' : 'var(--bg-elevated)',
+                          padding: 20, borderRadius: 'var(--radius-md)', marginBottom: 24,
+                          border: isCommitted ? '1px solid #BBF7D0' : '1px solid var(--border)',
+                          opacity: isCommitted ? 0.85 : 1,
+                          transition: 'all 0.3s ease',
+                        }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                            <div style={{ fontSize: 12, fontWeight: 600, color: isCommitted ? '#16A34A' : 'var(--accent-orange)' }}>
+                              SCENARIO {idx + 1}
+                            </div>
+                            {isCommitted && (
+                              <span className="badge badge-green" style={{ fontSize: 10 }}>✓ Committed to Vault</span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: 15, lineHeight: 1.6, marginBottom: 16 }}>{scene.scenario_text}</div>
 
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                          <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-secondary)' }}>Your Expert Decision:</label>
-                          <textarea
-                            value={expertDecision}
-                            onChange={(e) => setExpertDecision(e.target.value)}
-                            placeholder="Type your medical logic or protocol for handling this specific scenario..."
-                            style={{
-                              width: '100%', minHeight: 100, background: 'var(--bg-card)', border: '1px solid var(--border)',
-                              borderRadius: 'var(--radius-sm)', padding: 12, color: 'var(--text-primary)', fontFamily: 'inherit', resize: 'vertical'
-                            }}
-                          />
-                          <button
-                            onClick={() => handleCommitResolution(scene.id)}
-                            style={{
-                              alignSelf: 'flex-end', background: 'var(--accent-green)', color: '#fff', border: 'none',
-                              padding: '8px 16px', borderRadius: 'var(--radius-sm)', fontWeight: 600, cursor: 'pointer', marginTop: 8
-                            }}
-                          >
-                            Commit Logic to Vault
-                          </button>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-secondary)' }}>
+                              {isCommitted ? 'Your Submitted Decision:' : 'Your Expert Decision:'}
+                            </label>
+                            <textarea
+                              value={expertDecisions[scene.id] || ''}
+                              onChange={(e) => setExpertDecisions(prev => ({ ...prev, [scene.id]: e.target.value }))}
+                              disabled={isCommitted}
+                              placeholder="Type your medical logic or protocol for handling this specific scenario..."
+                              style={{
+                                width: '100%', minHeight: 100,
+                                background: isCommitted ? '#F0FDF4' : 'var(--bg-card)',
+                                border: isCommitted ? '1px solid #BBF7D0' : '1px solid var(--border)',
+                                borderRadius: 'var(--radius-sm)', padding: 12,
+                                color: isCommitted ? '#16A34A' : 'var(--text-primary)',
+                                fontFamily: 'inherit', resize: 'vertical',
+                                cursor: isCommitted ? 'not-allowed' : 'text',
+                              }}
+                            />
+                            <button
+                              onClick={() => handleCommitResolution(scene.id)}
+                              disabled={isCommitted}
+                              style={{
+                                alignSelf: 'flex-end',
+                                background: isCommitted ? '#BBF7D0' : 'var(--accent-green)',
+                                color: isCommitted ? '#16A34A' : '#fff',
+                                border: 'none',
+                                padding: '8px 16px', borderRadius: 'var(--radius-sm)',
+                                fontWeight: 600,
+                                cursor: isCommitted ? 'not-allowed' : 'pointer',
+                                marginTop: 8,
+                                transition: 'all 0.3s ease',
+                              }}
+                            >
+                              {isCommitted ? '✓ Committed' : 'Commit Logic to Vault'}
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 )}
               </div>

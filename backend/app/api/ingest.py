@@ -2,6 +2,7 @@ from fastapi import APIRouter, UploadFile, File, HTTPException
 import os
 import shutil
 import uuid
+import hashlib
 from ..graph.pipeline import create_pipeline
 from ..models.state import GraphState
 from ..services.pii_scrubber import PIIScrubber
@@ -10,6 +11,38 @@ router = APIRouter()
 
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# In-memory registry of file hashes to detect duplicates across server restarts
+# Maps file_hash -> {"document_id": ..., "filename": ...}
+_upload_hash_registry: dict[str, dict] = {}
+
+def _compute_file_hash(file_path: str) -> str:
+    """Compute SHA-256 hash of a file's contents."""
+    sha256 = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            sha256.update(chunk)
+    return sha256.hexdigest()
+
+def _rebuild_hash_registry(upload_dir: str):
+    """Scan existing uploads to rebuild the hash registry on startup."""
+    if _upload_hash_registry:
+        return  # Already built
+    if not os.path.exists(upload_dir):
+        return
+    for fname in os.listdir(upload_dir):
+        fpath = os.path.join(upload_dir, fname)
+        if os.path.isfile(fpath):
+            try:
+                file_hash = _compute_file_hash(fpath)
+                # Extract document_id from filename format: {uuid}_{original_name}
+                doc_id = fname.split("_", 1)[0]
+                _upload_hash_registry[file_hash] = {
+                    "document_id": doc_id,
+                    "filename": fname.split("_", 1)[1] if "_" in fname else fname,
+                }
+            except Exception:
+                pass
 
 @router.post("/ingest")
 async def ingest_file(file: UploadFile = File(...)):
@@ -21,11 +54,55 @@ async def ingest_file(file: UploadFile = File(...)):
     upload_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "uploads")
     upload_dir = os.path.normpath(upload_dir)
     os.makedirs(upload_dir, exist_ok=True)
+
+    # Rebuild hash registry from existing files (runs once)
+    _rebuild_hash_registry(upload_dir)
+
     file_path = os.path.join(upload_dir, f"{file_id}_{file.filename}")
     
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
+
+    # Duplicate detection: hash the uploaded file and check if it already exists
+    file_hash = _compute_file_hash(file_path)
+    if file_hash in _upload_hash_registry:
+        existing = _upload_hash_registry[file_hash]
+        # Remove the duplicate file we just saved — use the original one
+        os.remove(file_path)
+        existing_doc_id = existing["document_id"]
         
+        # Find the original file on disk to re-run the pipeline (state is in-memory and may be lost on restart)
+        original_path = None
+        for fname in os.listdir(upload_dir):
+            if fname.startswith(existing_doc_id):
+                original_path = os.path.join(upload_dir, fname)
+                break
+        
+        if original_path and os.path.exists(original_path):
+            # Re-run the pipeline to restore in-memory state (no new chunks created — chunks already exist in Supabase)
+            import asyncio
+            pipeline = create_pipeline()
+            initial_state = GraphState(document_id=existing_doc_id, source_path=original_path)
+            try:
+                await asyncio.wait_for(
+                    asyncio.to_thread(pipeline.invoke, initial_state, {"configurable": {"thread_id": existing_doc_id}}),
+                    timeout=300.0
+                )
+            except Exception:
+                pass
+            return {
+                "message": "Document already exists. Pipeline state restored.",
+                "document_id": existing_doc_id,
+                "file_path": original_path,
+                "pipeline_status": "restored_from_duplicate",
+                "is_duplicate": True
+            }
+        else:
+            raise HTTPException(status_code=409, detail="Document was previously uploaded but the file is missing on disk. Please contact support.")
+    
+    # Register this file hash
+    _upload_hash_registry[file_hash] = {"document_id": file_id, "filename": file.filename}
+
     # Trigger LangGraph Pipeline — pass file_path via state so the ingestion node doesn't hardcode
     import asyncio
     

@@ -37,7 +37,7 @@ class SupabaseService:
         if not self.client: return []
         response = self.client.rpc("match_expert_dna", {
             "query_embedding": embedding,
-            "match_threshold": 0.75, # Higher threshold for DNA matching
+            "match_threshold": 0.40, # Lowered — short queries vs long expert paragraphs yield ~0.5-0.6 similarity
             "match_count": limit
         }).execute()
         return response.data

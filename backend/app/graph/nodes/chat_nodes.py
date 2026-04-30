@@ -17,7 +17,7 @@ def retrieve_context_node(state: ChatState) -> ChatState:
     if results:
         state.confidence = results[0].get("similarity", 0.0)
         state.retrieved_cases = results
-        state.persona_mode = "primary" if state.confidence > 0.75 else "deputy"
+        state.persona_mode = "primary" if state.confidence > 0.50 else "deputy"
     else:
         state.confidence = 0.0
         state.retrieved_cases = []

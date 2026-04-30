@@ -20,7 +20,31 @@ def ingestion_node(state: GraphState) -> GraphState:
     embedder = EmbeddingService()
     db = SupabaseService()
 
+    # Skip re-ingestion if chunks already exist for this document
+    existing_count = 0
+    try:
+        res = db.client.table("document_chunks").select("id", count="exact").eq("document_id", state.document_id).limit(0).execute()
+        existing_count = res.count or 0
+    except Exception:
+        pass
+
     file_path = state.source_path
+
+    if existing_count > 0:
+        print(f"[SKIP] {existing_count} chunks already exist for document {state.document_id}. Skipping re-ingestion.")
+        # Still parse locally to populate state.raw_chunks for downstream nodes
+        if file_path.endswith('.docx'):
+            chunks = parser.parse_docx(file_path)
+        elif file_path.endswith('.pdf'):
+            chunks = parser.parse_pdf(file_path)
+        else:
+            return state
+        for chunk in chunks:
+            chunk["content"] = scrubber.scrub(chunk["content"])
+            chunk["document_id"] = state.document_id
+        state.raw_chunks = [DocumentChunk(**c) for c in chunks]
+        return state
+
     all_chunks = []
 
     # Parse the single uploaded file
@@ -34,6 +58,13 @@ def ingestion_node(state: GraphState) -> GraphState:
 
     for chunk in chunks:
         chunk["content"] = scrubber.scrub(chunk["content"])
+
+    # Filter out empty/whitespace-only chunks
+    chunks = [c for c in chunks if c["content"].strip()]
+
+    if not chunks:
+        print(f"[ERROR] No text content extracted from {os.path.basename(file_path)}. The document may be scanned/image-only.")
+        return state
 
     # Generate embeddings in batch and save to Supabase
     texts = [c["content"] for c in chunks]
@@ -51,3 +82,4 @@ def ingestion_node(state: GraphState) -> GraphState:
 
     state.raw_chunks = all_chunks
     return state
+

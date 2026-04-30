@@ -19,7 +19,7 @@ const PIPELINE_STAGES = [
   { name: 'AI Journalist Extraction', status: 'built', module: 'expert_persona' },
   { name: 'Persona Manifestation', status: 'built', module: 'expert_persona' },
   { name: 'Shadow Mode Review', status: 'built', module: 'expert_persona' },
-  { name: 'Skills Layer', status: 'in_progress', module: 'skills' },
+  { name: 'Skills Layer', status: 'built', module: 'skills' },
   { name: 'Runtime Retrieval + Chat', status: 'planned', module: 'retrieval' },
 ]
 

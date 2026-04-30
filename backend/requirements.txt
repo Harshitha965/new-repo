@@ -12,3 +12,5 @@ pytest
 httpx
 faster-whisper
 cryptography
+sqlalchemy
+tenacity
