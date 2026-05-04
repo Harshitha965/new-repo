@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from typing import Optional, Dict, Any
 from ..graph.chat_pipeline import create_chat_pipeline
 from ..models.chat_state import ChatState
 from ..services.pii_scrubber import PIIScrubber
@@ -45,13 +46,25 @@ async def chat_message(req: ChatRequest):
         rationale = scrubber.restore(result_state_dict.get("rationale", ""))
         sources = [f"Logic Vault ID: {r.get('scenario_id', 'Unknown')}" for r in result_state_dict.get("retrieved_cases", [])]
         
+        # NEW SKILL FIELDS
+        intent_type = result_state_dict.get("intent_type", "knowledge")
+        skill_result = result_state_dict.get("skill_result")
+        skill_status = result_state_dict.get("skill_status", "")
+        detected_skill = result_state_dict.get("detected_skill", "")
+        extracted_params = result_state_dict.get("extracted_params", {})
+        
         return {
             "response": response_text,
             "confidence": confidence,
             "persona_mode": persona_mode,
             "sources": sources,
             "rationale": rationale,
-            "latency_ms": latency
+            "latency_ms": latency,
+            "intent_type": intent_type,
+            "skill_result": skill_result,
+            "skill_status": skill_status,
+            "detected_skill": detected_skill,
+            "extracted_params": extracted_params
         }
     except Exception as e:
         print(f"Chat Engine Error: {str(e)}")

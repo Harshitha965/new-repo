@@ -17,13 +17,55 @@ export default function ChatPage() {
       sources: [],
     }
   ])
+  const [hasHydrated, setHasHydrated] = useState(false)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const bottomRef = useRef(null)
+  const fileInputRef = useRef(null)
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0]
+    if (file) {
+      setInput(prev => prev + (prev ? ' ' : '') + `[Document Attached: ${file.name}]`)
+    }
+  }
+
+  const formatMarkdown = (text) => {
+    if (!text) return null;
+    const lines = text.split('\n');
+    return lines.map((line, lineIndex) => {
+      const parts = line.split(/(\*\*.*?\*\*)/g);
+      return (
+        <div key={lineIndex} style={{ minHeight: line.trim() === '' ? '0.8em' : 'auto' }}>
+          {parts.map((part, index) => {
+            if (part.startsWith('**') && part.endsWith('**')) {
+              return <strong key={index}>{part.slice(2, -2)}</strong>;
+            }
+            return <span key={index}>{part}</span>;
+          })}
+        </div>
+      );
+    });
+  };
 
   useEffect(() => {
+    const saved = sessionStorage.getItem('twin_chat_messages')
+    if (saved) {
+      try {
+        setMessages(JSON.parse(saved))
+      } catch (e) {
+        console.error("Failed to parse saved messages", e)
+      }
+    }
+    setHasHydrated(true)
+  }, [])
+
+  useEffect(() => {
+    if (hasHydrated) {
+      sessionStorage.setItem('twin_chat_messages', JSON.stringify(messages))
+    }
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+  }, [messages, hasHydrated])
 
   async function handleSignOut() {
     if (hasSupabaseConfig) {
@@ -55,6 +97,11 @@ export default function ChatPage() {
         mode: data.persona_mode,
         sources: data.sources || [],
         rationale: data.rationale,
+        intent_type: data.intent_type,
+        skill_result: data.skill_result,
+        skill_status: data.skill_status,
+        detected_skill: data.detected_skill,
+        extracted_params: data.extracted_params
       }
       setMessages(prev => [...prev, assistantMessage])
 
@@ -148,17 +195,55 @@ export default function ChatPage() {
 
               {/* Bubble */}
               <div style={{ maxWidth: '68%' }}>
-                <div style={{
-                  padding: '14px 18px',
-                  borderRadius: msg.role === 'user' ? '18px 4px 18px 18px' : '4px 18px 18px 18px',
-                  background: msg.role === 'user' ? 'linear-gradient(135deg, #0D9488, #14B8A6)' : '#FFFFFF',
-                  border: msg.role === 'user' ? 'none' : '1px solid var(--border)',
-                  color: msg.role === 'user' ? '#FFFFFF' : 'var(--text-primary)',
-                  fontSize: 14, lineHeight: 1.65,
-                  boxShadow: msg.role === 'user' ? '0 4px 12px rgba(13,148,136,0.2)' : 'var(--shadow-card)',
-                }}>
-                  {msg.content}
-                </div>
+                {msg.intent_type === 'action' ? (
+                  <div style={{
+                    padding: '16px',
+                    borderRadius: '8px',
+                    background: msg.skill_status === 'DISABLED' ? '#FEF2F2' : (msg.skill_status === 'NOT_REGISTERED' ? '#FFFBEB' : '#F0FDFA'),
+                    border: `1px solid ${msg.skill_status === 'DISABLED' ? '#FCA5A5' : (msg.skill_status === 'NOT_REGISTERED' ? '#FCD34D' : '#5EEAD4')}`,
+                    color: 'var(--text-primary)',
+                    fontSize: 14, lineHeight: 1.65,
+                    boxShadow: 'var(--shadow-card)',
+                    display: 'flex', flexDirection: 'column', gap: '12px'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontWeight: 600, color: msg.skill_status === 'DISABLED' ? '#B91C1C' : (msg.skill_status === 'NOT_REGISTERED' ? '#D97706' : '#0F766E') }}>
+                        {msg.skill_status === 'DISABLED' ? '🚫 ACTION RESTRICTED' : (msg.skill_status === 'NOT_REGISTERED' ? '🔧 ACTION NOT AVAILABLE' : '⚡ ACTION EXECUTED')}
+                      </span>
+                      <span className={`badge ${msg.skill_status === 'DISABLED' ? 'badge-red' : (msg.skill_status === 'NOT_REGISTERED' ? 'badge-amber' : 'badge-green')}`}>
+                        {msg.skill_status}
+                      </span>
+                    </div>
+                    
+                    <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                      <strong>Skill:</strong> {msg.detected_skill}<br/>
+                      {msg.extracted_params && Object.keys(msg.extracted_params).length > 0 && (
+                        <><strong>Params:</strong> {JSON.stringify(msg.extracted_params)}<br/></>
+                      )}
+                    </div>
+                    
+                    <div style={{ 
+                      paddingTop: '12px', 
+                      borderTop: `1px solid ${msg.skill_status === 'DISABLED' ? '#FECACA' : (msg.skill_status === 'NOT_REGISTERED' ? '#FDE68A' : '#99F6E4')}`,
+                      whiteSpace: 'pre-wrap'
+                    }}>
+                      {formatMarkdown(msg.content)}
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{
+                    padding: '14px 18px',
+                    borderRadius: msg.role === 'user' ? '18px 4px 18px 18px' : '4px 18px 18px 18px',
+                    background: msg.role === 'user' ? 'linear-gradient(135deg, #0D9488, #14B8A6)' : '#FFFFFF',
+                    border: msg.role === 'user' ? 'none' : '1px solid var(--border)',
+                    color: msg.role === 'user' ? '#FFFFFF' : 'var(--text-primary)',
+                    fontSize: 14, lineHeight: 1.65,
+                    boxShadow: msg.role === 'user' ? '0 4px 12px rgba(13,148,136,0.2)' : 'var(--shadow-card)',
+                    whiteSpace: 'pre-wrap'
+                  }}>
+                    {formatMarkdown(msg.content)}
+                  </div>
+                )}
 
                 {/* Metadata for assistant messages */}
                 {msg.role === 'assistant' && msg.confidence !== null && (
@@ -218,6 +303,28 @@ export default function ChatPage() {
           background: '#FFFFFF',
         }}>
           <div style={{ display: 'flex', gap: 10 }}>
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileUpload}
+              style={{ display: 'none' }}
+              accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              style={{
+                padding: '0 12px',
+                background: '#F9FAFB',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-md)',
+                cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 20
+              }}
+              title="Upload Document"
+            >
+              📎
+            </button>
             <input
               value={input}
               onChange={e => setInput(e.target.value)}

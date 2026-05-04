@@ -67,6 +67,28 @@ You must apply strict clinical safety protocols while maintaining a deeply empat
 Instead of asking endless questions, provide direct, actionable medical guidance based ONLY on your explicit rationale.
 If your rationale indicates no cases were found, you must state that you do not have human-verified guidance on this yet.
 
+When explaining clinical reports (like labs, scans, or fertility assessments), you MUST structure your response using the following expert reasoning framework:
+1. **Data integration**: Combine related parameters (e.g., FSH + E2, AMH + AFC, follicle size + cycle day).
+2. **Cycle-phase context**: Interpret values based on their specific timing (Day 3, mid-cycle, luteal phase).
+3. **Probabilistic outcomes**: Include conception chances and expected time-to-pregnancy where applicable.
+4. **Partner (male) factor**: Always mention the need for semen analysis if evaluating fertility.
+5. **Risk framing**: Mention future risks even if current results are "normal".
+6. **Incomplete evaluation acknowledgment**: Call out missing essential checks (tubal patency, endometriosis).
+7. **Clinical thresholds**: Define when to wait naturally vs when to escalate (e.g., 6–12 months rules).
+8. **Actionable fertility guidance**: Provide specific advice like timing intercourse and ovulation tracking (no generic lifestyle tips).
+9. **Clinical reasoning structure**: Format your response strictly as: Findings → Interpretation → Synthesis → Plan.
+10. **Edge case awareness**: Handle abnormal/borderline scenarios explicitly (PCOS, low AMH).
+11. **Uncertainty handling**: Include your confidence level and limitations ("based on available data").
+12. **Personalization**: Adjust advice explicitly based on the patient's age, history, and goals.
+
+**FORMATTING RULES:**
+- NEVER output a single giant block of text.
+- Use DOUBLE NEWLINES (\n\n) between major sections (Findings, Interpretation, Synthesis, Plan).
+- EVERY numbered point (1., 2., 3., etc.) MUST start on its own brand new line.
+- Use bold headers and sub-headers for readability.
+- The user's screen is small; use vertical space to make it readable and professional.
+- DO NOT combine multiple numbered points on the same line.
+
 YOUR EXPLICIT RATIONALE (Audit Trace):
 {state.rationale}
 """
@@ -81,6 +103,7 @@ YOUR EXPLICIT RATIONALE (Audit Trace):
     )
     
     state.response = completion.choices[0].message.content
+    print(f"--- DEBUG: Raw LLM Response ---\n{repr(state.response)}\n-------------------------------")
     return state
 
 def audit_node(state: ChatState) -> ChatState:
@@ -88,16 +111,28 @@ def audit_node(state: ChatState) -> ChatState:
     db = SupabaseService()
     
     try:
-        db.insert_chat_audit_log({
-            "expert_id": state.expert_id,
-            "session_id": state.session_id,
-            "user_query": state.query,
-            "retrieved_cases": [r.get("scenario_id", "Unknown") for r in state.retrieved_cases],
-            "rationale": state.rationale,
-            "final_response": state.response,
-            "confidence": state.confidence,
-            "latency_ms": 0 # Track latency if desired, 0 for now
-        })
+        if state.intent_type == "action":
+            db.insert_chat_audit_log({
+                "expert_id": state.expert_id,
+                "session_id": state.session_id,
+                "user_query": state.query,
+                "retrieved_cases": [],
+                "rationale": f"Action execution triggered: {state.detected_skill} (Status: {state.skill_status})",
+                "final_response": state.response,
+                "confidence": 1.0,
+                "latency_ms": 0 # Track latency if desired, 0 for now
+            })
+        else:
+            db.insert_chat_audit_log({
+                "expert_id": state.expert_id,
+                "session_id": state.session_id,
+                "user_query": state.query,
+                "retrieved_cases": [r.get("scenario_id", "Unknown") for r in state.retrieved_cases],
+                "rationale": state.rationale,
+                "final_response": state.response,
+                "confidence": state.confidence,
+                "latency_ms": 0 # Track latency if desired, 0 for now
+            })
     except Exception as e:
         print(f"Audit log failed: {e}")
         
